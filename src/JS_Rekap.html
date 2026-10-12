@@ -1,0 +1,168 @@
+<script>
+/* ---------- rekap: sub tab ---------- */
+$('rekapTabs').onclick=e=>{
+  const b=e.target.closest('button[data-rtab]');if(!b)return;
+  document.querySelectorAll('#rekapTabs button').forEach(x=>x.classList.toggle('active',x===b));
+  ['bulan','tahun'].forEach(t=>$('tab_'+t).hidden=(t!==b.dataset.rtab));
+};
+
+/* ---------- rekap bulanan ---------- */
+$('btnMonthLoad').onclick=loadMonth;
+async function loadMonth(){
+  const idx=$('selMonth').value;if(idx==='')return toast('Belum ada sheet bulan','err');
+  try{
+    const md=await run('apiMonth',S.token,idx);S.month=md;
+    const t=md.totals;
+    const cards=`<div class="cards">${cardsHTML([['H','Hadir',t.H],['T','Telat',t.T],['I','Izin',t.I],['S','Sakit',t.S],['TJ','Tidak ada jadwal',t.TJ],['A','Alpa',t.A],['BA','Belum absen (BA)',t.BA],['','Rata-rata kehadiran',pctTxt(md.avgPct)]])}</div>`;
+    const baWarn=t.BA?`<div class="warn">⚠️ Ada <b>${t.BA}</b> sel <b>BA</b> (guru belum absen). Klik sel BA pada tabel untuk mengoreksi: isi jam masuk, sistem menentukan Hadir / Telat; atau pilih Alpa / Izin / Sakit.</div>`:'';
+    $('monthOut').innerHTML=cards+baWarn+holListHTML(md,false)+legendHTML()+'<div class="scroll">'+matrixHTML(md,false)+'</div>'+notesHTML(md);
+  }catch(e){toast(errMsg(e),'err');}
+}
+function holListHTML(md,pr){
+  if(!md.holidays||!md.holidays.length)return pr?'':'<p class="muted">📅 Tidak ada hari libur nasional / khusus pada bulan ini.</p>';
+  const mon=md.name.slice(0,3), txt=md.holidays.map(h=>`${h.day} ${mon} — ${esc(h.name)}`).join('; ');
+  return pr?`<div class="lg"><b>Hari libur:</b> ${txt}</div>`:`<p class="muted">📅 <b>Hari libur:</b> ${txt}</p>`;
+}
+const legendHTML=()=>`<div class="legend">${Object.keys(ST).map(k=>`<span class="chip c-${k}">${k} = ${ST[k]}</span>`).join('')}</div>`;
+function dow(md,d){return new Date(md.year,md.idx,d).getDay();}
+function matrixHTML(md,pr){
+  if(!md.teachers.length)return '<p class="warn">Belum ada nama guru pada sheet bulan ini. Tambahkan guru di menu Koreksi Absensi atau isi nama pada sheet.</p>';
+  const cc=pr?'cc':'cell', days=[...Array(md.days)].map((_,i)=>i+1), dt=md.dayType||[], hn={};
+  (md.holidays||[]).forEach(x=>hn[x.day]=x.name);
+  let h=`<table class="${pr?'':'t m'}"><thead><tr><th class="c">No</th><th>Nama</th>${days.map(d=>`<th class="c ${dt[d-1]==='H'?'hol':dt[d-1]==='W'?'sun':''}" title="${esc(hn[d]||'')}">${d}</th>`).join('')}
+    <th class="c">H</th><th class="c">T</th><th class="c">I</th><th class="c">S</th><th class="c">TJ</th><th class="c">A</th><th class="c">BA</th><th class="c">%</th></tr></thead><tbody>`;
+  md.teachers.forEach((t,i)=>{
+    h+=`<tr><td class="c">${i+1}</td><td style="white-space:nowrap">${esc(t.name)}</td>${t.cells.map((c,k)=>{
+      const ba=(!pr&&c==='BA')?` data-ba="${i}|${k+1}" title="Belum absen — klik untuk koreksi"`:'';
+      return `<td class="${cc} ${c} ${dt[k]==='W'?'wk':''}"${ba}>${c}</td>`;}).join('')}
+      <td class="c">${t.H}</td><td class="c">${t.T}</td><td class="c">${t.I}</td><td class="c">${t.S}</td><td class="c">${t.TJ}</td><td class="c">${t.A}</td><td class="c">${t.BA}</td>
+      <td class="c pg ${pr?'':pctCls(t.pct)}">${pctTxt(t.pct)}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+function notesHTML(md){
+  const rows=md.teachers.map((t,i)=>({i,t})).filter(o=>o.t.note||(o.t.proofs&&o.t.proofs.length));
+  const pl=t=>(t.proofs||[]).filter(p=>/^https:\/\//.test(p.url)).map(p=>`<a href="${esc(p.url)}" target="_blank" rel="noopener">📎 tgl ${p.day} (${esc(p.st)})</a>`).join(' · ');
+  if(!rows.length)return '<p class="muted">Tidak ada catatan keterangan pada bulan ini.</p>';
+  return `<h3>Catatan Keterangan (Izin / Sakit / Telat)</h3><div class="scroll"><table class="t"><thead><tr><th>No</th><th>Nama</th><th>Catatan</th></tr></thead><tbody>
+   ${rows.map(o=>`<tr><td>${o.i+1}</td><td style="white-space:nowrap">${esc(o.t.name)}</td><td>${esc(o.t.note)}${pl(o.t)?`<div class="muted" style="margin-top:4px">Bukti: ${pl(o.t)}</div>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ---------- rekap tahunan ---------- */
+$('btnYearLoad').onclick=loadYear;
+async function loadYear(){
+  try{
+    const y=await run('apiYear',S.token);S.year=y;
+    if(!y.months.length){$('yearOut').innerHTML='<p class="muted">Belum ada data absensi pada tahun ajaran ini.</p>';return;}
+    const t=y.totals;
+    const cards=`<div class="cards">${cardsHTML([['H','Hadir',t.H],['T','Telat',t.T],['I','Izin',t.I],['S','Sakit',t.S],['TJ','Tidak ada jadwal',t.TJ],['A','Alpa',t.A],['BA','Belum absen (BA)',t.BA],['',`Rata-rata TA ${y.ay}`,pctTxt(y.avgPct)]])}</div>`;
+    $('yearOut').innerHTML=`<h3 style="margin-top:0">Tahun Ajaran ${y.ay}</h3>`+cards+'<div class="scroll">'+yearTable(y,false)+'</div>'
+      +'<p class="muted">Kehadiran % = (Hadir + Telat) ÷ (Hadir + Telat + Izin + Sakit + Alpa). "Tidak ada jadwal", Libur, dan BA (belum dikoreksi) tidak dihitung.</p>';
+  }catch(e){toast(errMsg(e),'err');}
+}
+function yearTable(y,pr){
+  let h=`<table class="${pr?'':'t'}"><thead><tr><th class="c">No</th><th>Nama</th>${y.months.map(m=>`<th class="c" title="${m.name}">${m.name.slice(0,3)}</th>`).join('')}
+    <th class="c">H</th><th class="c">T</th><th class="c">I</th><th class="c">S</th><th class="c">TJ</th><th class="c">A</th><th class="c">BA</th><th class="c">%</th></tr></thead><tbody>`;
+  y.teachers.forEach((t,i)=>{
+    h+=`<tr><td class="c">${i+1}</td><td style="white-space:nowrap">${esc(t.name)}</td>${t.perMonth.map(p=>`<td class="c ${pr?'':pctCls(p&&p.pct)}">${p?pctTxt(p.pct):'-'}</td>`).join('')}
+      <td class="c">${t.H}</td><td class="c">${t.T}</td><td class="c">${t.I}</td><td class="c">${t.S}</td><td class="c">${t.TJ}</td><td class="c">${t.A}</td><td class="c">${t.BA}</td><td class="c pg ${pr?'':pctCls(t.pct)}">${pctTxt(t.pct)}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+
+/* ---------- cetak ---------- */
+function kopHTML(){
+  if(S.kop)return `<img class="kop" src="${S.kop}" alt="Kop Surat">`;
+  return `<div class="kopfb"><b>${esc(S.set.NamaSekolah||'')}</b></div>`;
+}
+function ttdHTML(dt){
+  const s=S.set;
+  return `<div class="ttd">${esc(s.Kota||'')}, ${jktDate(dt||nowJkt())}<br>${esc(s.Jabatan||'')}<div class="sp"></div>
+   <b><u>${esc(s.NamaPenandatangan||'')}</u></b>${s.NIP?`<br>NIP. ${esc(s.NIP)}`:''}</div>`;
+}
+function fitOnePage(orient){
+  const el=$('printArea'), box=el.firstChild;if(!box)return;
+  const w=orient==='portrait'?190:277, hMax=(orient==='portrait'?277:190)*3.7795-8;
+  el.style.cssText='display:block;position:absolute;left:-9999px;top:0;width:'+w+'mm';
+  let fs=10.5;box.style.setProperty('--fs',fs+'px');
+  while(box.scrollHeight>hMax&&fs>5.5){fs-=0.5;box.style.setProperty('--fs',fs+'px');}
+  el.style.cssText='';
+}
+function doPrint(html,orient,fit){
+  if(!S.kop)toast('Kop surat belum terbaca'+(S.kopErr?': '+S.kopErr:'')+'. Cetakan memakai judul sekolah.','err');
+  $('printArea').innerHTML=`<div class="pr">${html}</div>`;
+  $('pageStyle').textContent=`@page{size:A4 ${orient};margin:10mm}`;
+  setTimeout(()=>{if(fit)fitOnePage(orient);window.print();},350);
+}
+function lateMin(note){let t=0,m;const re=/telat\s*:?\s*(\d+)\s*(?:mnt|menit)/gi;while((m=re.exec(note||'')))t+=+m[1];return t;}
+$('btnMonthPrint').onclick=async()=>{
+  if(!S.month||String(S.month.idx)!==$('selMonth').value)await loadMonth();
+  const md=S.month;if(!md)return;
+  const T=md.totals, showTJ=T.TJ>0, showBA=T.BA>0, z=v=>v?v:'-';
+  const wd=(md.dayType||[]).filter(x=>!x).length;
+  const lm=md.teachers.map(t=>lateMin(t.note)), lmTot=lm.reduce((a,b)=>a+b,0);
+  const cols=[['H','H'],['A','A'],['I','I'],['S','S'],['T','T']].concat(showTJ?[['TJ','TJ']]:[]).concat(showBA?[['BA','BA']]:[]);
+  const rows=md.teachers.map((t,i)=>`<tr><td class="n">${i+1}</td><td>${esc(t.name)}</td>${cols.map(c=>`<td class="n">${z(t[c[0]])}</td>`).join('')}
+    <td class="n">${lm[i]?lm[i]+' mnt':'-'}</td><td class="n">${pctTxt(t.pct)}</td><td class="k">${esc(t.note)||'-'}</td></tr>`).join('');
+  const tot=`<tr class="tot"><td colspan="2" class="n">JUMLAH</td>${cols.map(c=>`<td class="n">${z(T[c[0]])}</td>`).join('')}
+    <td class="n">${lmTot?lmTot+' mnt':'-'}</td><td class="n">${pctTxt(md.avgPct)}</td><td class="k">Rata-rata kehadiran</td></tr>`;
+  const colgroup=`<colgroup><col style="width:4%"><col style="width:25%">${cols.map(()=>'<col style="width:3.6%">').join('')}<col style="width:8%"><col style="width:6%"><col></colgroup>`;
+  const end=new Date(Date.UTC(md.year,md.idx,md.days,5)), ttdDate=end<nowJkt()?end:nowJkt();
+  doPrint(`${kopHTML()}<h4 style="margin:6px 0 0;font-size:12px">Rekap Absen Guru Bulan ${md.name} ${md.year}</h4>
+    <table class="rk">${colgroup}<thead><tr><th>NO</th><th>NAMA</th>${cols.map(c=>`<th>${c[1]}</th>`).join('')}<th>TELAT<br>(total)</th><th>HADIR<br>%</th><th>KETERANGAN</th></tr></thead><tbody>${rows}${tot}</tbody></table>
+    <div class="rkinfo"><b>Ringkasan:</b> ${wd} hari kerja efektif · Hadir ${T.H} · Telat ${T.T}${lmTot?` (total ${lmTot} mnt)`:''} · Izin ${T.I} · Sakit ${T.S} · Alpa ${T.A}${showBA?` · Belum absen ${T.BA}`:''}${showTJ?` · Tidak ada jadwal ${T.TJ}`:''}<br>
+    <b>Keterangan:</b> H = Hadir, A = Alpa (tanpa keterangan), I = Izin, S = Sakit, T = Telat${showTJ?', TJ = Tidak ada jadwal':''}${showBA?', BA = Belum absen':''}. Hadir % = (H+T) ÷ (H+T+I+S+A). Total telat dihitung dari catatan keterlambatan.
+    ${md.holidays&&md.holidays.length?`<br>${holListHTML(md,true).replace(/<\/?div[^>]*>/g,'')}`:''}</div>
+    <div style="margin-top:10px">${ttdHTML(ttdDate)}</div>`,'portrait',true);
+};
+$('btnYearPrint').onclick=async()=>{
+  if(!S.year)await loadYear();
+  const y=S.year;if(!y||!y.months.length)return toast('Belum ada data untuk dicetak','err');
+  let notes='';
+  if($('chkNotes').checked){
+    const rows=y.teachers.map((t,i)=>({i,t,n:t.perMonth.map((p,mi)=>p&&p.note?`<b>${y.months[mi].name}:</b> ${esc(p.note)}`:'').filter(Boolean)})).filter(o=>o.n.length);
+    if(rows.length)notes=`<h4 style="text-align:left;font-size:11px;margin-top:10px">Catatan Keterangan per Guru</h4><table><thead><tr><th style="width:24px">No</th><th style="width:25%">Nama</th><th>Catatan</th></tr></thead><tbody>
+      ${rows.map(o=>`<tr><td class="ctr">${o.i+1}</td><td>${esc(o.t.name)}</td><td>${o.n.join('<br>')}</td></tr>`).join('')}</tbody></table>`;
+  }
+  doPrint(`${kopHTML()}<h4>Rekapitulasi Absensi Guru Tahun Ajaran ${y.ay}</h4><div class="sub">Persentase kehadiran per bulan dan total</div>
+    ${yearTable(y,true)}
+    <div class="lg"><b>Keterangan:</b> H = Hadir, T = Telat, I = Izin, S = Sakit, TJ = Tidak ada jadwal, A = Alpa, BA = Belum absen. Kehadiran % = (H+T) ÷ (H+T+I+S+A). Rata-rata kehadiran: <b>${pctTxt(y.avgPct)}</b></div>
+    ${notes}${ttdHTML()}`,'landscape');
+};
+
+/* ---------- koreksi ---------- */
+function syncAd(){
+  const v=$('adStatus').value, hasTime=!!$('adTime').value;
+  $('adTimeBox').hidden=!(v==='H'||v==='T');
+  $('adLateBox').hidden=!(v==='T'&&!hasTime);
+  $('adJamLim').textContent=S.jam;
+}
+$('adStatus').onchange=syncAd;$('adTime').oninput=syncAd;
+$('btnAdSave').onclick=async()=>{
+  const b=$('btnAdSave');b.disabled=true;
+  try{
+    const r=await run('apiAdminSet',S.token,{date:$('adDate').value,name:$('adName').value,status:$('adStatus').value,note:$('adNote').value,minLate:$('adLate').value,time:$('adTime').value});
+    let m='Tersimpan';
+    if(r.status)m+=': '+ST[r.status]+(r.status==='T'&&r.minLate?` (${r.minLate} menit)`:'')+(r.time&&$('adTime').value?` · jam masuk ${r.time}`:'');
+    toast(m,'ok');$('adNote').value='';$('adTime').value='';syncAd();S.month=null;S.year=null;
+  }catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;}
+};
+/* klik sel BA pada rekap bulanan -> buka form koreksi dengan tanggal & nama terisi */
+$('monthOut').onclick=e=>{
+  const td=e.target.closest('td[data-ba]');if(!td||!S.month)return;
+  const p=td.dataset.ba.split('|').map(Number), t=S.month.teachers[p[0]];if(!t)return;
+  $('adDate').value=`${S.month.year}-${String(S.month.idx+1).padStart(2,'0')}-${String(p[1]).padStart(2,'0')}`;
+  $('adName').value=t.name;$('adStatus').value='H';$('adTime').value='';$('adNote').value='';
+  syncAd();go('koreksi');toast('Isi jam masuk untuk '+t.name+' (tgl '+p[1]+'), lalu Simpan','ok');
+};
+$('btnAddTeacher').onclick=async()=>{
+  const n=$('newTeacher').value;
+  try{
+    const r=await run('apiAddTeacher',S.token,n);
+    toast(`Guru ditambahkan ke ${r.added} sheet`,'ok');$('newTeacher').value='';
+    S.teachers.push(n.replace(/\s+/g,' ').trim());$('adName').innerHTML=S.teachers.map(x=>`<option>${esc(x)}</option>`).join('');
+  }catch(e){toast(errMsg(e),'err');}
+};
+
+</script>

@@ -1,0 +1,125 @@
+<script>
+/* ---------- login, sesi & password ---------- */
+/* token disimpan di sessionStorage + localStorage (cadangan, karena sebagian browser HP / WebView memblokir salah satunya) */
+const SS={
+  get(){let v='';for(const n of ['sessionStorage','localStorage']){if(v)break;try{v=window[n].getItem('absen_tok')||'';}catch(e){}}return v;},
+  set(v){['sessionStorage','localStorage'].forEach(n=>{try{v?window[n].setItem('absen_tok',v):window[n].removeItem('absen_tok');}catch(e){}});}
+};
+async function loadLogo(){
+  try{
+    const r=await run('apiLogo');
+    if(r&&r.ok&&/^data:image\//.test(r.src))document.querySelectorAll('.logo,.logo2').forEach(e=>{e.innerHTML='<img alt="Logo sekolah">';e.firstChild.src=r.src;e.classList.add('has-img');});
+  }catch(e){}
+}
+$('btnLogin').onclick=login;$('lgPass').onkeydown=e=>{if(e.key==='Enter')login();};$('lgId').onkeydown=e=>{if(e.key==='Enter')$('lgPass').focus();};
+async function login(){
+  const id=$('lgId').value.trim(),pw=$('lgPass').value;
+  if(!id||!pw)return toast('Isi ID Login dan password','err');
+  const b=$('btnLogin');b.disabled=true;b.textContent='Memeriksa…';
+  try{const r=await run('apiLogin',id,pw);$('lgPass').value='';await startSession(r);}
+  catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;b.textContent='Masuk';}
+}
+async function startSession(r){
+  S.token=r.token;S.user=r.user;S.cfg=r.cfg||{};SS.set(r.token);
+  S.off=r.serverMs-Date.now();S.jam=S.cfg.jamMasuk||S.jam;
+  document.body.classList.remove('anon','role-admin','role-guru');
+  document.body.classList.add(isAdmin()?'role-admin':'role-guru');
+  $('userBox').innerHTML=`<b>${esc(S.user.disp)}</b><span>${isAdmin()?'Admin':'Guru'} · ${esc(S.user.id)}</span>`;
+  $('schoolName').textContent=S.cfg.school||'Absensi Guru';document.title='Absensi Guru — '+(S.cfg.school||'');
+  if(S.user.mustChange){go('password');return;}
+  await loadAdminData();
+  go('home');
+}
+async function loadAdminData(){
+  if(!isAdmin())return;
+  try{
+    const r=await run('apiAdminInit',S.token);
+    S.set=r.settings;S.months=r.months;S.teachers=r.teachers;S.jam=r.settings.JamMasuk||S.jam;fillAdmin(r);
+    run('apiKop',S.token).then(k=>{if(k.ok){S.kop=k.src;if(k.lowRes)toast('Kop surat terbaca beresolusi rendah. Simpan kop sebagai PNG/JPG agar cetakan tajam.');}else S.kopErr=k.message;}).catch(()=>{});
+  }catch(e){toast(errMsg(e),'err');}
+}
+function endSession(){
+  S.token='';S.user=null;S.loc=null;S.kop=null;S.month=null;S.year=null;SS.set('');
+  document.body.classList.remove('role-admin','role-guru');document.body.classList.add('anon');
+  $('homeDetail').hidden=true;$('userBox').innerHTML='';
+}
+$('navLogout').onclick=async()=>{
+  const t=S.token;endSession();go('login');
+  try{await run('apiLogout',t);}catch(e){}
+  toast('Anda sudah keluar','ok');
+};
+$('btnPw').onclick=async()=>{
+  const o=$('pwOld').value,n=$('pwNew').value,n2=$('pwNew2').value;
+  if(!o||!n)return toast('Isi password lama dan baru','err');
+  if(n!==n2)return toast('Ulangi password baru dengan sama persis','err');
+  const b=$('btnPw');b.disabled=true;
+  try{
+    await run('apiChangePassword',S.token,o,n);
+    $('pwOld').value=$('pwNew').value=$('pwNew2').value='';
+    const was=S.user.mustChange;S.user.mustChange=false;toast('Password berhasil diganti','ok');
+    if(was)await loadAdminData();
+    go('home');
+  }catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;}
+};
+
+/* ---------- kelola akun (admin) ---------- */
+let ACC={items:[],teachers:[]};
+function accRow(a,isNew){
+  const opt=(arr,v)=>arr.map(x=>`<option${x===v?' selected':''}>${esc(x)}</option>`).join('');
+  const names=['',...ACC.teachers].map(n=>`<option value="${esc(n)}"${n===a.name?' selected':''}>${n?esc(n):'— tidak terhubung —'}</option>`).join('');
+  const info=isNew?'<span class="muted">Baru — belum disimpan</span>':`<span class="muted">${a.mustChange?'Belum ganti password · ':''}${a.last?'Login: '+esc(a.last):'Belum pernah login'}</span>`;
+  return `<tr data-orig="${esc(isNew?'':a.id)}"><td><input class="ai" value="${esc(a.id)}" placeholder="ID Login" autocapitalize="none"></td>
+    <td><select class="an">${names}</select></td>
+    <td><select class="aj">${opt(['Guru','Admin'],a.job)}</select></td>
+    <td><select class="as">${opt(['Aktif','Nonaktif'],a.active?'Aktif':'Nonaktif')}</select></td><td>${info}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-asave>Simpan</button> ${isNew?'':'<button class="btn ghost sm" data-areset>Reset Password</button>'}</td></tr>`;
+}
+async function loadAccounts(){
+  try{
+    ACC=await run('apiAccounts',S.token);$('accDefPw').textContent=ACC.defaultPw;
+    $('accBody').innerHTML=ACC.items.map(a=>accRow(a,false)).join('')||'<tr><td colspan="6" class="muted">Belum ada akun.</td></tr>';
+  }catch(e){toast(errMsg(e),'err');}
+}
+$('btnAccAdd').onclick=()=>{
+  if($('accBody').querySelector('tr[data-orig=""]'))return;
+  $('accBody').insertAdjacentHTML('afterbegin',accRow({id:'',name:'',job:'Guru',active:true},true));
+  $('accBody').querySelector('input.ai').focus();
+};
+$('btnAccSync').onclick=async()=>{
+  const b=$('btnAccSync');b.disabled=true;
+  try{const r=await run('apiSyncAccounts',S.token);toast((r.added||r.updated)?`${r.added} akun baru, ${r.updated} akun diperbarui dari sheet Nama Guru`:'Akun sudah sesuai sheet Nama Guru','ok');loadAccounts();}
+  catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;}
+};
+$('accBody').onclick=async e=>{
+  const b=e.target.closest('button');if(!b)return;
+  const tr=b.closest('tr'),orig=tr.dataset.orig;
+  try{
+    if(b.hasAttribute('data-asave')){
+      b.disabled=true;
+      const r=await run('apiSaveAccount',S.token,{origId:orig,id:tr.querySelector('.ai').value,name:tr.querySelector('.an').value,job:tr.querySelector('.aj').value,active:tr.querySelector('.as').value==='Aktif'});
+      toast(r.created?`Akun dibuat. Password awal: ${r.defaultPw} (wajib diganti saat login)`:'Akun diperbarui','ok');loadAccounts();
+    }else if(b.hasAttribute('data-areset')){
+      if(!confirm('Reset password akun "'+orig+'" ke password awal? Pengguna akan keluar dan wajib menggantinya.'))return;
+      b.disabled=true;const r=await run('apiResetPassword',S.token,orig);
+      alert('Password akun "'+orig+'" direset menjadi: '+r.password+'\n\nBeri tahu pengguna; ia wajib menggantinya saat login.');loadAccounts();
+    }
+  }catch(er){toast(errMsg(er),'err');b.disabled=false;}
+};
+
+const SET_KEYS=['NamaSekolah','Kota','JamMasuk','HariKerja','CutiBersama','TahunAjaranMulai','Jabatan','NamaPenandatangan','NIP','PasswordAwal','LokasiWajib','RadiusMeter','SekolahLat','SekolahLng','MaxAkurasi'];
+function updMapLink(){const a=$('set_SekolahLat').value.trim(),b=$('set_SekolahLng').value.trim();$('lnkMap').href=`https://www.google.com/maps?q=${encodeURIComponent(a+','+b)}`;}
+['set_SekolahLat','set_SekolahLng'].forEach(i=>$(i).oninput=updMapLink);
+function fillAdmin(r){
+  $('schoolName').textContent=S.set.NamaSekolah||'Absensi Guru';
+  SET_KEYS.forEach(k=>$('set_'+k).value=S.set[k]||'');updMapLink();
+  $('selMonth').innerHTML=S.months.map(m=>`<option value="${m.idx}">${m.name} ${m.year}</option>`).join('');
+  if(r&&r.now){const o=[...$('selMonth').options].find(x=>+x.value===r.now.m);if(o)o.selected=true;}
+  $('adName').innerHTML=S.teachers.map(n=>`<option>${esc(n)}</option>`).join('');
+  $('adDate').value=jktISO(nowJkt());
+  syncAd();
+}
+
+</script>

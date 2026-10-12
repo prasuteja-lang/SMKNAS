@@ -1,0 +1,147 @@
+<script>
+/* ---------- pengaturan ---------- */
+$('btnUseHere').onclick=async()=>{
+  const b=$('btnUseHere');b.disabled=true;b.textContent='Mengambil lokasi…';
+  try{const p=await bestPosition(15000);$('set_SekolahLat').value=p.lat.toFixed(6);$('set_SekolahLng').value=p.lng.toFixed(6);updMapLink();toast('Koordinat terisi (akurasi ±'+p.acc+' m). Klik Simpan Pengaturan.','ok');}
+  catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;b.textContent='📍 Pakai lokasi saya sekarang';}
+};
+$('btnSaveSet').onclick=async()=>{
+  const o={};SET_KEYS.forEach(k=>o[k]=$('set_'+k).value);
+  try{
+    const r=await run('apiSaveSettings',S.token,o);
+    S.set=r.settings;S.jam=S.set.JamMasuk;
+    S.cfg=Object.assign(S.cfg,{school:S.set.NamaSekolah,jamMasuk:S.set.JamMasuk,lokasiWajib:S.set.LokasiWajib,lat:parseFloat(S.set.SekolahLat),lng:parseFloat(S.set.SekolahLng),radius:+S.set.RadiusMeter,maxAcc:+S.set.MaxAkurasi});syncAd();
+    $('schoolName').textContent=S.set.NamaSekolah;document.title='Absensi Guru — '+S.set.NamaSekolah;
+    S.month=null;S.year=null;
+    toast('Pengaturan disimpan','ok');
+  }catch(e){toast(errMsg(e),'err');}
+};
+
+/* ---------- hari libur ---------- */
+const HL_CLS={'Nasional':'c-L','Cuti Bersama':'c-S','Khusus':'c-I'};
+const hlFmt=s=>new Date(s+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+async function loadHolidays(){
+  try{
+    const r=await run('apiHolidays',S.token);
+    $('holAY').innerHTML=`<b>Tahun Ajaran ${esc(r.ay)}</b> · ${r.hariKerja} hari kerja/minggu · Cuti bersama: ${r.cutiBersama==='Masuk'?'tetap masuk':'dianggap libur'}`;
+    $('holBody').innerHTML=r.items.length?r.items.map(x=>{
+      const st=x.effective?'<span class="chip c-L">Libur</span>':(!x.active?'<span class="chip c-H">Tetap masuk</span>':'<span class="chip c-H">Masuk (sesuai pengaturan)</span>');
+      let btn='';
+      if(x.type==='Khusus')btn=`<button class="btn ghost sm" data-hdel="${x.date}">Hapus</button>`;
+      else if(!x.active)btn=`<button class="btn ghost sm" data-htog="${x.date}" data-act="1">Libur lagi</button>`;
+      else if(x.effective)btn=`<button class="btn ghost sm" data-htog="${x.date}" data-act="0">Tetap masuk</button>`;
+      return `<tr><td style="white-space:nowrap">${esc(hlFmt(x.date))}</td><td>${esc(x.name)}</td><td><span class="chip ${HL_CLS[x.type]||'c-L'}">${esc(x.type)}</span></td><td>${st}</td><td>${btn}</td></tr>`;
+    }).join(''):'<tr><td colspan="5" class="muted">Belum ada data libur. Klik "Sinkronkan Libur Nasional".</td></tr>';
+  }catch(e){toast(errMsg(e),'err');}
+}
+const holChanged=()=>{S.month=null;S.year=null;};
+$('holBody').onclick=async e=>{
+  const b=e.target.closest('button');if(!b)return;
+  try{
+    if(b.dataset.hdel){
+      if(!confirm('Hapus libur khusus tanggal '+hlFmt(b.dataset.hdel)+'?'))return;
+      b.disabled=true;await run('apiDeleteHoliday',S.token,b.dataset.hdel);toast('Libur khusus dihapus','ok');
+    }else if(b.dataset.htog){
+      b.disabled=true;await run('apiToggleHoliday',S.token,b.dataset.htog,b.dataset.act==='1');toast('Status libur diperbarui','ok');
+    }else return;
+    holChanged();loadHolidays();
+  }catch(er){toast(errMsg(er),'err');b.disabled=false;}
+};
+function openHolModal(date){
+  $('hlStart').value=date||jktISO(nowJkt());$('hlEnd').value='';$('hlName').value='';
+  $('holModal').hidden=false;setTimeout(()=>$('hlName').focus(),60);
+}
+$('btnHolAdd').onclick=()=>openHolModal();
+$('btnMonthHol').onclick=()=>openHolModal();
+$('hlCancel').onclick=()=>$('holModal').hidden=true;
+$('holModal').onclick=e=>{if(e.target===$('holModal'))$('holModal').hidden=true;};
+$('hlSave').onclick=async()=>{
+  const b=$('hlSave');b.disabled=true;
+  try{
+    const r=await run('apiAddHoliday',S.token,{start:$('hlStart').value,end:$('hlEnd').value,name:$('hlName').value});
+    const n=r.added+r.updated;
+    let m=n?`Libur khusus tersimpan (${n} hari)`:'Tidak ada tanggal yang ditambahkan';
+    if(r.skippedWeekend)m+=`, ${r.skippedWeekend} hari akhir pekan dilewati`;
+    if(r.skippedNational)m+=`, ${r.skippedNational} tanggal sudah libur nasional`;
+    toast(m,n?'ok':'err');$('holModal').hidden=true;holChanged();
+    if(S.page==='libur')loadHolidays();
+    else if(S.page==='rekap'&&!$('tab_bulan').hidden&&$('monthOut').querySelector('table'))loadMonth();
+  }catch(er){toast(errMsg(er),'err');}
+  finally{b.disabled=false;}
+};
+$('btnHolSync').onclick=async()=>{
+  const b=$('btnHolSync');b.disabled=true;
+  try{const r=await run('apiSyncNational',S.token);holChanged();toast(r.added?`${r.added} tanggal libur nasional ditambahkan`:'Libur nasional sudah lengkap','ok');loadHolidays();}
+  catch(er){toast(errMsg(er),'err');}
+  finally{b.disabled=false;}
+};
+
+/* ---------- buka absen hari libur (admin) ---------- */
+const RQ_CLS={'Menunggu':'c-S','Disetujui':'c-H','Ditolak':'c-T'};
+async function loadRequests(){
+  try{
+    const r=await run('apiWorkRequests',S.token);
+    setReqBadge(r.items.filter(x=>x.date===r.today&&x.status==='Menunggu').length);
+    $('reqBody').innerHTML=r.items.length?r.items.map(x=>{
+      const past=x.date<r.today;
+      const st=(x.status==='Menunggu'&&past)?'<span class="chip c-none">Kedaluwarsa</span>':`<span class="chip ${RQ_CLS[x.status]||'c-S'}">${esc(x.status)}</span>`;
+      let btn='';
+      if(!past){
+        if(x.status!=='Disetujui')btn+=`<button class="btn sm" data-rq="Disetujui">✅ Setujui</button> `;
+        if(x.status!=='Ditolak')btn+=`<button class="btn ghost sm" data-rq="Ditolak">${x.status==='Disetujui'?'↩️ Cabut':'❌ Tolak'}</button>`;
+      }
+      return `<tr data-date="${esc(x.date)}" data-id="${esc(x.id)}"><td style="white-space:nowrap">${esc(hlFmt(x.date))}</td><td>${esc(x.name)}</td><td>${esc(x.note)}</td><td>${st}${x.by?`<div class="muted">oleh ${esc(x.by)}</div>`:''}</td><td style="white-space:nowrap">${btn}</td></tr>`;
+    }).join(''):'<tr><td colspan="5" class="muted">Belum ada permintaan buka absen.</td></tr>';
+  }catch(e){toast(errMsg(e),'err');}
+}
+$('btnReqReload').onclick=loadRequests;
+$('reqBody').onclick=async e=>{
+  const b=e.target.closest('button[data-rq]');if(!b)return;
+  const tr=b.closest('tr');b.disabled=true;
+  try{
+    await run('apiDecideWork',S.token,tr.dataset.date,tr.dataset.id,b.dataset.rq);
+    toast(b.dataset.rq==='Disetujui'?'Absen dibuka untuk guru ini':'Permintaan ditolak / dicabut','ok');loadRequests();
+  }catch(er){toast(errMsg(er),'err');b.disabled=false;}
+};
+
+/* ---------- sheet bulan ---------- */
+$('btnSetupMonths').onclick=async()=>{
+  if(!confirm('Buat & format semua sheet bulan (Agustus–Juli)? Daftar guru diambil dari sheet Nama Guru. Sheet yang sudah berisi absensi tidak dihapus datanya.'))return;
+  const b=$('btnSetupMonths');b.disabled=true;b.textContent='Memproses… (bisa sampai 1 menit)';
+  try{const r=await run('apiSetupMonths',S.token);$('setupOut').textContent=r.summary;holChanged();toast('Sheet bulan siap','ok');}
+  catch(er){toast(errMsg(er),'err');}
+  finally{b.disabled=false;b.textContent='🗓️ Buat & Format Semua Sheet Bulan';}
+};
+
+/* ---------- rapikan data ---------- */
+$('btnClean').onclick=async()=>{
+  if(!confirm('Sistem akan membuat salinan cadangan di Google Drive, lalu merapikan semua sheet bulan (isi L pada hari libur, kode O menjadi H, rapikan nama & tampilan). Lanjutkan?'))return;
+  const b=$('btnClean');b.disabled=true;b.textContent='Merapikan… (bisa sampai 1 menit)';
+  try{const r=await run('apiCleanData',S.token);$('cleanOut').textContent=r.summary;holChanged();toast('Data selesai dirapikan','ok');}
+  catch(er){toast(errMsg(er),'err');}
+  finally{b.disabled=false;b.textContent='🧹 Rapikan Data Semua Sheet Bulan';}
+};
+
+/* ---------- start ---------- */
+(async function(){
+  initTheme();
+  setInterval(tick,1000);tick();
+  const t=SS.get();
+  if(t)document.body.classList.add('resuming');else go('login');      // ada sesi tersimpan: jangan tampilkan login sekejap
+  loadLogo();
+  run('apiPublicInit').then(r=>{
+    S.off=r.serverMs-Date.now();S.jam=r.jamMasuk;
+    $('schoolName').textContent=r.school;$('loginSchool').textContent=r.school;document.title='Absensi Guru — '+r.school;tick();
+  }).catch(()=>{});
+  if(t){
+    try{const r=await run('apiResume',t);await startSession(r);}          // sesi masih aktif -> langsung ke Home
+    catch(e){
+      if(/Sesi berakhir/.test(errMsg(e)))SS.set('');                      // hanya hapus token bila memang kedaluwarsa
+      else toast(errMsg(e),'err');
+      go('login');
+    }
+    finally{document.body.classList.remove('resuming');}
+  }
+})();
+</script>
