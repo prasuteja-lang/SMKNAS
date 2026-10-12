@@ -1,0 +1,188 @@
+<script>
+/* ---------- home ---------- */
+const showLibur=n=>{$('homeLibur').hidden=false;$('homeLibur').textContent='📅 Hari ini libur: '+n+'. Absensi tidak diperlukan. Jika Anda tetap masuk, ajukan "Minta Buka Absen" lewat menu Absensi.';};
+function setReqBadge(n){const b=$('navReqBadge');b.hidden=!n;b.textContent=n||'';}
+async function loadHome(){
+  $('homeErr').hidden=true;$('homeLibur').hidden=true;$('homeReq').hidden=true;
+  try{
+    let c, rows=null;
+    if(isAdmin()){
+      const r=await run('apiToday',S.token);c=r.counts;rows=r.rows;c.total=rows.length;if(r.libur)showLibur(r.libur);
+      const pq=r.pendingReq||0;setReqBadge(pq);
+      if(pq){$('homeReq').hidden=false;$('homeReq').innerHTML=`🔓 Ada <b>${pq}</b> guru meminta absen dibuka hari ini. <button class="btn sm" type="button" id="btnGoReq" style="margin-left:6px">Lihat permintaan</button>`;$('btnGoReq').onclick=()=>go('izin');}
+    }else{
+      const r=await run('apiHomeSummary',S.token);
+      if(r.error){$('homeErr').hidden=false;$('homeErr').textContent=r.error;$('homeCards').innerHTML='';return;}
+      if(r.libur){showLibur(r.libur);$('homeCards').innerHTML='';$('homeNote').hidden=true;$('homeDetail').hidden=true;return;}
+      c=r.counts;
+    }
+    $('homeCards').innerHTML=cardsHTML([['H','Hadir',c.H],['T','Telat',c.T],['I','Izin',c.I],['S','Sakit',c.S],['TJ','Tidak ada jadwal',c.TJ],['A','Alpa',c.A||0],['B','Belum absen',c.belum],['','Total guru',c.total]]);
+    $('homeNote').hidden=!!rows;
+    $('homeDetail').hidden=!rows;
+    if(rows){
+      $('dashBody').innerHTML=rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td>${chip(x.status)}</td><td>${esc(x.time)||'-'}</td>
+        <td>${esc(x.note)}${x.status==='T'&&x.minLate?` <span class="muted">(${x.minLate} mnt)</span>`:''}${/^https:\/\//.test(x.proof||'')?` <a href="${esc(x.proof)}" target="_blank" rel="noopener">📎 Bukti</a>`:''}</td></tr>`).join('');
+    }
+  }catch(e){$('homeErr').hidden=false;$('homeErr').textContent=errMsg(e);}
+}
+
+/* ---------- lokasi ---------- */
+const hav=(a,b,c,d)=>{const R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,q=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return Math.round(R*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q)));};
+function bestPosition(maxMs){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation)return rej(new Error('Browser ini tidak mendukung lokasi. Gunakan Chrome / Safari terbaru.'));
+    let best=null,done=false,wid=null;
+    const fin=()=>{if(done)return;done=true;if(wid!=null)navigator.geolocation.clearWatch(wid);clearTimeout(tm);best?res(best):rej(new Error('Lokasi tidak berhasil diambil. Pastikan GPS aktif lalu coba lagi.'));};
+    const tm=setTimeout(fin,maxMs||12000);
+    wid=navigator.geolocation.watchPosition(p=>{
+      if(!best||p.coords.accuracy<best.acc)best={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy),ts:Date.now()};
+      if(best.acc<=25)fin();
+    },e=>{
+      if(done)return;
+      if(e.code===1){done=true;clearTimeout(tm);navigator.geolocation.clearWatch(wid);rej(new Error('Izin lokasi ditolak. Izinkan lokasi untuk situs ini (ikon gembok di address bar) dan buka aplikasi lewat Chrome / Safari, bukan dari dalam aplikasi chat.'));}
+    },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  });
+}
+function showLoc(){
+  const c=S.cfg||{},box=$('locBox'),st=$('locStatus'),sub=$('locSub');
+  if(!S.loc){box.className='locbox';return;}
+  const d=(isFinite(c.lat)&&isFinite(c.lng))?hav(S.loc.lat,S.loc.lng,c.lat,c.lng):null;
+  S.loc.dist=d;
+  if(c.lokasiWajib==='Tidak'){box.className='locbox ok';st.textContent='📍 Pengecekan lokasi tidak diwajibkan';sub.textContent='';return;}
+  if(d==null){box.className='locbox bad';st.textContent='⚠️ Titik sekolah belum diatur admin';sub.textContent='';return;}
+  const inside=d<=c.radius&&S.loc.acc<=c.maxAcc;
+  box.className='locbox '+(inside?'ok':'bad');
+  st.textContent=(inside?'✅ Di dalam area sekolah':(d>c.radius?'❌ Di luar area sekolah':'⚠️ Akurasi GPS kurang'))+' — jarak ±'+d+' m';
+  sub.textContent='Batas radius '+c.radius+' m · akurasi GPS ±'+S.loc.acc+' m (maks '+c.maxAcc+' m). Izin / Sakit / Tidak ada jadwal tidak dibatasi lokasi.';
+}
+async function refreshLoc(quiet){
+  $('locBox').className='locbox';$('locStatus').textContent='📍 Mengambil lokasi…';$('locSub').textContent='';$('btnLoc').disabled=true;
+  try{S.loc=await bestPosition();showLoc();return true;}
+  catch(e){S.loc=null;$('locBox').className='locbox bad';$('locStatus').textContent='❌ '+errMsg(e);if(!quiet)toast(errMsg(e),'err');return false;}
+  finally{$('btnLoc').disabled=false;}
+}
+$('btnLoc').onclick=()=>refreshLoc();
+const offClosed=ds=>!!(ds&&ds.off&&!(ds.req&&ds.req.status==='Disetujui'));
+function renderOff(ds){
+  const off=!!(ds&&ds.off), st=ds&&ds.req?ds.req.status:'', closed=offClosed(ds);
+  $('offBox').hidden=!closed;$('formBox').hidden=closed;
+  const open=!!(ds&&ds.adminOpen);
+  $('offOk').hidden=!((off&&!closed)||open);
+  $('offOk').textContent=open?'🔓 Hari libur'+(ds.name?' ('+ds.name+')':'')+'. Sebagai Admin, absen Anda langsung terbuka tanpa perlu persetujuan.':'🔓 Admin sudah membuka absen untuk Anda hari ini.';
+  if(closed){
+    $('offTitle').textContent=ds.name||'Libur';
+    $('offAsk').hidden=st==='Menunggu';$('offWait').hidden=st!=='Menunggu';$('offDenied').hidden=st!=='Ditolak';
+    $('offWaitNote').textContent=st==='Menunggu'?'Alasan: '+ds.req.note:'';
+  }
+}
+async function prepAbsen(){
+  $('meName').textContent=S.user&&S.user.name?S.user.name:'—';
+  $('resultBox').hidden=true;
+  if(S.user&&!S.user.name){$('initErr').hidden=false;$('initErr').textContent='Akun ini belum dihubungkan dengan data guru, jadi tidak bisa absen. Hubungi admin.';$('btnSubmit').disabled=true;}
+  else{$('initErr').hidden=true;$('btnSubmit').disabled=false;}
+  try{S.day=await run('apiDayStatus',S.token);}catch(e){S.day=null;}
+  renderOff(S.day);
+  if(!offClosed(S.day))refreshLoc(true);
+}
+$('btnOffReq').onclick=async()=>{
+  const note=$('offNote').value.trim();
+  if(note.length<3){$('offNote').classList.add('note-need');$('offNote').focus();return toast('Isi alasan masuk di hari libur','err');}
+  const b=$('btnOffReq');b.disabled=true;b.textContent='Mengirim…';
+  try{
+    const r=await run('apiRequestWork',S.token,{note});
+    if(!r.ok){toast(r.message,'err');return;}
+    toast(r.status==='Disetujui'?'Absen sudah dibuka oleh admin':'Permintaan terkirim ke admin','ok');
+    $('offNote').value='';await prepAbsen();
+  }catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;b.textContent='🔓 Minta Buka Absen';}
+};
+$('offNote').oninput=()=>$('offNote').classList.remove('note-need');
+$('btnOffCheck').onclick=async()=>{
+  const b=$('btnOffCheck');b.disabled=true;
+  try{await prepAbsen();const st=S.day&&S.day.req?S.day.req.status:'';toast(st==='Disetujui'?'Disetujui — silakan absen':st==='Ditolak'?'Permintaan ditolak admin':'Masih menunggu persetujuan admin',st==='Disetujui'?'ok':'');}
+  finally{b.disabled=false;}
+};
+/* otomatis cek persetujuan tiap 15 detik selama guru menunggu */
+setInterval(async()=>{
+  if(!S.token||S.page!=='absen'||$('offWait').hidden)return;
+  try{
+    const ds=await run('apiDayStatus',S.token);S.day=ds;renderOff(ds);
+    if(!offClosed(ds)){refreshLoc(true);toast('Admin sudah membuka absen untuk Anda','ok');}
+  }catch(e){}
+},15000);
+
+/* ---------- absen guru ---------- */
+document.querySelectorAll('.opt').forEach(b=>b.onclick=()=>{
+  S.pick=b.dataset.st;S.lateNeed=false;
+  document.querySelectorAll('.opt').forEach(x=>x.classList.toggle('sel',x===b));
+  $('proofBox').hidden=!(S.pick==='I'||S.pick==='S');
+  updateNoteLabel();
+});
+$('btnSubmit').onclick=async()=>{
+  const note=$('note').value.trim();
+  if(!S.pick)return toast('Pilih keterangan kehadiran','err');
+  const hasProof=!!(S.proof&&(S.pick==='I'||S.pick==='S'));
+  const b=$('btnSubmit');b.disabled=true;b.textContent=hasProof?'Mengunggah bukti…':'Mengirim…';
+  try{
+    if(S.pick==='H'&&S.cfg.lokasiWajib!=='Tidak'&&(!S.loc||Date.now()-S.loc.ts>90000)){
+      b.textContent='Mengambil lokasi…';
+      if(!(await refreshLoc()))return;
+    }
+    const L=S.loc||{};
+    const r=await run('apiSubmit',S.token,{status:S.pick,note,lat:L.lat,lng:L.lng,acc:L.acc,file:hasProof?{name:S.proof.name,mime:S.proof.mime,data:S.proof.data}:null});
+    if(r.ok){showResult(r);}
+    else if(r.needNote){S.lateNeed=true;updateNoteLabel();$('note').classList.add('note-need');$('note').focus();toast(r.message,'err');}
+    else{if(r.loc){$('locBox').className='locbox bad';$('locStatus').textContent='❌ '+r.message;}toast(r.message,'err');}
+  }catch(e){toast(errMsg(e),'err');}
+  finally{b.disabled=false;b.textContent='Kirim Absen';}
+};
+$('note').oninput=()=>$('note').classList.remove('note-need');
+
+/* ---------- bukti izin / sakit (foto atau PDF) ---------- */
+S.proof=null;
+const readB64=blob=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=()=>rej(new Error('File tidak bisa dibaca'));r.readAsDataURL(blob);});
+const loadImg=file=>new Promise((res,rej)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);res(im);};im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('decode'));};im.src=u;});
+async function prepProof(f){
+  if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){
+    if(f.size>5*1024*1024)throw new Error('PDF maksimal 5 MB. Kecilkan ukuran atau kirim sebagai foto.');
+    return {name:f.name,mime:'application/pdf',data:await readB64(f),prev:''};
+  }
+  if(!/^image\//.test(f.type)&&!/\.(jpe?g|png|webp|heic|heif)$/i.test(f.name))throw new Error('Pilih foto (JPG/PNG) atau file PDF.');
+  try{
+    const im=await loadImg(f),k=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+    const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(im,0,0,c.width,c.height);
+    const url=c.toDataURL('image/jpeg',.82);
+    return {name:f.name.replace(/\.[^.]+$/,'')+'.jpg',mime:'image/jpeg',data:url.split(',')[1],prev:url};
+  }catch(e){
+    if(f.size>4*1024*1024)throw new Error('Format gambar tidak bisa diproses. Gunakan foto JPG/PNG atau PDF.');
+    return {name:f.name,mime:f.type||'image/jpeg',data:await readB64(f),prev:''};
+  }
+}
+function showProof(){
+  const p=S.proof,im=$('proofPrev');
+  $('proofName').textContent=p?`${p.name} · ${Math.max(1,Math.round(p.data.length*0.75/1024))} KB`:'Belum ada file';
+  $('btnProofClear').hidden=!p;
+  if(p&&p.prev){im.src=p.prev;im.hidden=false;}else{im.removeAttribute('src');im.hidden=true;}
+}
+function clearProof(){S.proof=null;$('proofFile').value='';showProof();}
+$('btnProof').onclick=()=>$('proofFile').click();
+$('btnProofClear').onclick=clearProof;
+$('proofFile').onchange=async()=>{
+  const f=$('proofFile').files[0];if(!f)return;
+  $('proofName').textContent='Memproses…';
+  try{S.proof=await prepProof(f);showProof();}
+  catch(e){clearProof();toast(errMsg(e),'err');}
+};
+function showResult(r){
+  $('formBox').hidden=true;$('resultBox').hidden=false;
+  const late=r.status==='T';
+  $('resultBox').innerHTML=`<div class="big">${late?'⏰':r.status==='H'?'✅':'📌'}</div>
+   <h2>Absen berhasil dicatat</h2><p><b>${esc(r.name)}</b></p><p>${chip(r.status)}</p>
+   <p class="muted">Pukul ${esc(r.time)} WIB${late?` · terlambat ${r.minLate} menit (batas ${esc(r.jamMasuk)})`:''}${r.dist!=null&&(r.status==='H'||r.status==='T')?` · ±${r.dist} m dari sekolah`:''}${r.proof?' · 📎 bukti terunggah':''}</p>
+   <button class="btn ghost" id="btnAgain">Selesai</button>`;
+  $('btnAgain').onclick=()=>{$('resultBox').hidden=true;$('formBox').hidden=false;$('note').value='';S.pick='';S.lateNeed=false;clearProof();$('proofBox').hidden=true;
+    document.querySelectorAll('.opt').forEach(x=>x.classList.remove('sel'));updateNoteLabel();go('home');};
+}
+
+</script>

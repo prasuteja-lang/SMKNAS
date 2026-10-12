@@ -1,0 +1,88 @@
+<script>
+const $ = id => document.getElementById(id);
+const ST = {H:'Hadir', I:'Izin', S:'Sakit', T:'Telat', TJ:'Tidak Ada Jadwal', A:'Alpa', BA:'Belum Absen', L:'Libur'};
+const S = {off:0, jam:'07:00', token:'', user:null, cfg:{}, loc:null, set:{}, months:[], teachers:[], kop:null, pick:'', month:null, year:null, lateNeed:false, page:'home', next:null, theme:'light'};
+const TITLES = {home:'Home', absen:'Absensi Guru', rekap:'Rekap Absensi', koreksi:'Koreksi Absensi', libur:'Hari Libur', atur:'Pengaturan', akun:'Akun Login', password:'Ganti Password', login:'Masuk', izin:'Buka Absen Libur'};
+const ADMIN_PAGES = {rekap:1, koreksi:1, libur:1, atur:1, akun:1, izin:1};
+const isAdmin = () => !!(S.user && S.user.job === 'Admin');
+
+function run(fn, ...a){return new Promise((res,rej)=>google.script.run.withSuccessHandler(res).withFailureHandler(e=>{if(/Sesi berakhir/.test(errMsg(e)))expired();rej(e);})[fn](...a));}
+function expired(){if(!S.token)return;endSession();go('login');toast('Sesi berakhir, silakan login kembali','err');}
+function errMsg(e){return String((e&&e.message)||e).replace(/^(Error|Exception):\s*/,'');}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function toast(m,t){const x=$('toast');x.textContent=m;x.className=t||'';x.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>x.style.display='none',4200);}
+const nowJkt=()=>new Date(Date.now()+S.off);
+const jktTime=d=>d.toLocaleTimeString('en-GB',{timeZone:'Asia/Jakarta',hour12:false});
+const jktISO=d=>d.toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'});
+const jktLong=d=>d.toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta',weekday:'long',day:'numeric',month:'long',year:'numeric'});
+const jktDate=d=>d.toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta',day:'numeric',month:'long',year:'numeric'});
+const secOf=t=>{const p=t.split(':');return +p[0]*3600+ +p[1]*60+(+p[2]||0);};
+const chip=st=>st?`<span class="chip c-${st}">${ST[st]}</span>`:'<span class="chip c-none">Belum absen</span>';
+const pctCls=p=>p==null?'':p>=95?'p-hi':p>=85?'p-mid':'p-lo';
+const pctTxt=p=>p==null?'-':p.toFixed(1).replace('.0','')+'%';
+const cardsHTML=arr=>arr.map(x=>`<div class="stat ${x[0]}"><div class="n">${x[2]}</div><div class="l">${x[1]}</div></div>`).join('');
+
+/* ---------- tema gelap / terang ---------- */
+function applyTheme(t){
+  S.theme=t;document.documentElement.setAttribute('data-theme',t);
+  const dark=t==='dark';
+  $('themeBtn').textContent=dark?'☀️':'🌙';
+  $('themeIcon').textContent=dark?'☀️':'🌙';
+  $('themeLabel').textContent=dark?'Mode Terang':'Mode Gelap';
+  try{localStorage.setItem('absen_theme',t);}catch(e){}
+}
+function initTheme(){
+  let t=null;try{t=localStorage.getItem('absen_theme');}catch(e){}
+  if(t!=='dark'&&t!=='light')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+  applyTheme(t);
+}
+const toggleTheme=()=>applyTheme(S.theme==='dark'?'light':'dark');
+$('themeBtn').onclick=toggleTheme;$('navTheme').onclick=toggleTheme;
+
+/* ---------- jam & status ---------- */
+function tick(){
+  const d=nowJkt(), t=jktTime(d);
+  document.querySelectorAll('.js-clock').forEach(e=>e.textContent=t);
+  document.querySelectorAll('.js-date').forEach(e=>e.textContent=jktLong(d));
+  const late=secOf(t)>secOf(S.jam+':00');
+  document.querySelectorAll('.js-hint').forEach(h=>{
+    h.className='hint js-hint '+(late?'late':'ok');
+    h.textContent=late?`⏰ Sudah lewat ${S.jam} — absen Hadir akan tercatat TELAT`:`✅ Tepat waktu sampai ${S.jam}`;
+  });
+  $('hadirSub').textContent=late?'Akan tercatat Telat':'Datang mengajar';
+  updateNoteLabel();
+}
+function updateNoteLabel(){
+  const late=secOf(jktTime(nowJkt()))>secOf(S.jam+':00');
+  let l='Catatan (opsional)';
+  if(S.pick==='I')l='Alasan izin (wajib)'; else if(S.pick==='S')l='Keterangan sakit (wajib)';
+  else if(S.pick==='H'&&(late||S.lateNeed))l='Alasan terlambat (wajib)';
+  $('noteLabel').textContent=l;
+}
+
+/* ---------- navigasi sidebar ---------- */
+function go(p){
+  if(!S.token)p='login';
+  else if(p==='login')p='home';
+  if(ADMIN_PAGES[p]&&!isAdmin()){toast('Menu ini khusus Admin','err');p='home';}
+  if(S.user&&S.user.mustChange)p='password';
+  S.page=p;
+  Object.keys(TITLES).forEach(k=>$('pg_'+k).hidden=(k!==p));
+  document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===p));
+  $('pageTitle').textContent=TITLES[p];
+  document.body.classList.remove('nav-open');
+  window.scrollTo(0,0);
+  if(p==='home')loadHome();
+  if(p==='libur')loadHolidays();
+  if(p==='izin')loadRequests();
+  if(p==='akun')loadAccounts();
+  if(p==='absen')prepAbsen();
+  if(p==='password')$('pwForce').hidden=!(S.user&&S.user.mustChange);
+  if(p==='login')setTimeout(()=>$('lgId').focus(),60);
+}
+document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.onclick=()=>go(b.dataset.page));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+$('menuBtn').onclick=()=>document.body.classList.toggle('nav-open');
+$('backdrop').onclick=()=>document.body.classList.remove('nav-open');
+
+</script>

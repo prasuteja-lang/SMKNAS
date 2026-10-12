@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absensi Guru</title>
+<?!= include('Styles'); ?>
+<style id="pageStyle"></style>
+</head>
+<body class="anon">
+<div class="app">
+
+  <!-- ================= SIDEBAR KIRI ================= -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">🎓</div>
+      <div><h1 id="schoolName">SMK NASIONAL BANDUNG</h1><p>Sistem Absensi Guru</p></div>
+    </div>
+
+    <div class="navlabel">Menu</div>
+    <button class="nav-item active" data-page="home">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg><span>Home</span></button>
+    <button class="nav-item" data-page="absen">
+      <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h9"/></svg><span>Absensi</span></button>
+    <button class="nav-item admin-only" data-page="rekap">
+      <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg><span>Rekap</span></button>
+
+    <div class="navlabel">Kelola</div>
+    <button class="nav-item admin-only" data-page="koreksi">
+      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Koreksi Absensi</span></button>
+    <button class="nav-item admin-only" data-page="libur">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg><span>Hari Libur</span></button>
+    <button class="nav-item admin-only" data-page="izin">
+      <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg><span>Buka Absen Libur</span><span class="navbadge" id="navReqBadge" hidden></span></button>
+    <button class="nav-item admin-only" data-page="atur">
+      <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>Pengaturan</span></button>
+
+    <button class="nav-item admin-only" data-page="akun">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M17 11l2 2 3-3"/></svg><span>Akun Login</span></button>
+
+    <div class="side-foot">
+      <div class="userbox" id="userBox"></div>
+      <button class="nav-item" data-page="password">
+        <svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Ganti Password</span></button>
+      <button class="nav-item" id="navTheme"><span id="themeIcon" style="width:20px;text-align:center">🌙</span><span id="themeLabel">Mode Gelap</span></button>
+      <button class="nav-item" id="navLogout">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg><span>Keluar</span></button>
+    </div>
+  </aside>
+  <div class="backdrop" id="backdrop"></div>
+
+  <!-- ================= KONTEN ================= -->
+  <div class="content">
+    <header class="topbar">
+      <button class="iconbtn" id="menuBtn" aria-label="Buka menu">☰</button>
+      <h2 id="pageTitle">Home</h2>
+      <div class="grow"></div>
+      <span class="adminbadge">Admin</span>
+      <button class="iconbtn" id="themeBtn" title="Ganti mode gelap / terang" aria-label="Ganti tema">🌙</button>
+    </header>
+
+    <main class="page">
+
+      <!-- ===== HOME ===== -->
+      <section id="pg_home">
+        <div class="card hero">
+          <div class="clock">
+            <div class="d js-date">Memuat…</div>
+            <div class="t js-clock">--:--:--</div>
+            <span class="hint ok js-hint"></span>
+          </div>
+          <button class="btn" data-go="absen">✅ Absen Sekarang</button>
+        </div>
+        <div class="warn" id="homeErr" hidden></div>
+        <div class="warn" id="homeLibur" hidden></div>
+        <div class="warn" id="homeReq" hidden></div>
+        <h3 style="margin-top:4px">Ringkasan Absensi Hari Ini</h3>
+        <div class="cards" id="homeCards"></div>
+        <p class="muted" id="homeNote">Rincian nama dan catatan hanya tampil untuk Admin (menu Rekap).</p>
+        <div class="card" id="homeDetail" hidden>
+          <h2>Rincian Hari Ini</h2>
+          <div class="scroll"><table class="t"><thead><tr><th>No</th><th>Nama</th><th>Status</th><th>Jam</th><th>Catatan</th></tr></thead><tbody id="dashBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ===== ABSENSI ===== -->
+      <section id="pg_absen" hidden>
+        <div class="card center">
+          <div class="clock">
+            <div class="d js-date">Memuat…</div>
+            <div class="t js-clock">--:--:--</div>
+            <span class="hint ok js-hint"></span>
+          </div>
+          <div class="warn" id="initErr" hidden></div>
+          <div id="offBox" hidden>
+            <div class="who"><div class="muted">Hari ini</div><div class="nm" id="offTitle">Libur</div></div>
+            <div class="warn" id="offDenied" style="margin-top:14px" hidden>❌ Permintaan Anda sebelumnya <b>ditolak</b> admin. Anda dapat mengajukan lagi dengan alasan yang jelas.</div>
+            <div id="offAsk">
+              <p class="muted">Absensi ditutup karena hari libur. Jika Anda tetap masuk, minta admin membuka absen untuk Anda. Setelah disetujui, form absen terbuka otomatis.</p>
+              <label for="offNote">Alasan masuk (wajib)</label>
+              <textarea id="offNote" maxlength="300" placeholder="Contoh: piket, rapat, mengajar tambahan, kegiatan sekolah…"></textarea>
+              <button class="btn block" id="btnOffReq">🔓 Minta Buka Absen</button>
+            </div>
+            <div id="offWait" hidden>
+              <div class="warn" style="margin-top:14px">⏳ Permintaan Anda sudah dikirim dan <b>menunggu persetujuan admin</b>.</div>
+              <p class="muted" id="offWaitNote"></p>
+              <button class="btn block" id="btnOffCheck">🔄 Cek Status</button>
+            </div>
+          </div>
+          <div id="formBox">
+            <div class="warn" id="offOk" hidden>🔓 Admin sudah membuka absen untuk Anda hari ini.</div>
+            <div class="who"><div class="muted">Absen sebagai</div><div class="nm" id="meName">-</div></div>
+            <div class="locbox" id="locBox">
+              <div class="row"><div id="locStatus">📍 Lokasi belum diambil</div><button type="button" class="btn ghost sm" id="btnLoc">🔄 Perbarui lokasi</button></div>
+              <div class="muted" id="locSub" style="margin-top:6px"></div>
+            </div>
+
+            <label>Keterangan</label>
+            <div class="opts">
+              <button type="button" class="opt H" data-st="H"><span class="ic">✅</span><b>Hadir</b><small id="hadirSub">Datang mengajar</small></button>
+              <button type="button" class="opt I" data-st="I"><span class="ic">📝</span><b>Izin</b><small>Wajib isi alasan</small></button>
+              <button type="button" class="opt S" data-st="S"><span class="ic">🤒</span><b>Sakit</b><small>Wajib isi keterangan</small></button>
+              <button type="button" class="opt TJ" data-st="TJ"><span class="ic">📅</span><b>Tidak Ada Jadwal</b><small>Tidak mengajar hari ini</small></button>
+            </div>
+
+            <label for="note" id="noteLabel">Catatan (opsional)</label>
+            <textarea id="note" maxlength="300" placeholder="Contoh: anak sakit, kontrol ke dokter, macet di jalan…"></textarea>
+            <div class="proof" id="proofBox" hidden>
+              <label style="margin:0 0 8px">Bukti (opsional) — surat sakit / surat izin</label>
+              <input type="file" id="proofFile" accept="image/*,application/pdf" hidden>
+              <div class="pr-row">
+                <button type="button" class="btn ghost sm" id="btnProof">📎 Tambahkan dokumen / gambar</button>
+                <button type="button" class="btn ghost sm" id="btnProofClear" hidden>✕ Hapus</button>
+              </div>
+              <div class="muted" id="proofName" style="margin-top:6px">Belum ada file</div>
+              <img id="proofPrev" alt="Pratinjau bukti" hidden>
+              <div class="muted" style="margin-top:6px">Foto (JPG/PNG) atau PDF, maksimal 5 MB. Foto dikecilkan otomatis.</div>
+            </div>
+            <button class="btn block" id="btnSubmit">Kirim Absen</button>
+            <p class="muted" style="text-align:center;margin:12px 0 0">Waktu dicatat otomatis oleh sistem. Absen "Hadir" setelah jam masuk akan tercatat <b>Telat</b>. Jika lupa absen, hari itu otomatis menjadi <b>BA (Belum Absen)</b> dan akan dikoreksi oleh admin.</p>
+          </div>
+          <div id="resultBox" class="result" hidden></div>
+        </div>
+      </section>
+
+      <!-- ===== LOGIN ===== -->
+      <section id="pg_login" hidden>
+        <div class="card loginwrap">
+          <div class="logo2">🎓</div>
+          <h2 id="loginSchool">Absensi Guru</h2>
+          <p class="muted sub">Masuk dengan ID Login dan password Anda</p>
+          <label for="lgId">ID Login</label>
+          <input id="lgId" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="mis. SMKNAS001">
+          <label for="lgPass">Password</label>
+          <input type="password" id="lgPass" autocomplete="current-password" placeholder="Password">
+          <button class="btn block" id="btnLogin">Masuk</button>
+          <p class="muted" style="text-align:center;margin:14px 0 0">Lupa password? Hubungi admin untuk reset.</p>
+        </div>
+      </section>
+
+      <!-- ===== GANTI PASSWORD ===== -->
+      <section id="pg_password" hidden>
+        <div class="card center">
+          <h2>🔑 Ganti Password</h2>
+          <div class="warn" id="pwForce" hidden>Demi keamanan, Anda wajib mengganti password awal sebelum memakai aplikasi.</div>
+          <label for="pwOld">Password lama</label><input type="password" id="pwOld" autocomplete="current-password">
+          <label for="pwNew">Password baru (minimal 6 karakter)</label><input type="password" id="pwNew" autocomplete="new-password">
+          <label for="pwNew2">Ulangi password baru</label><input type="password" id="pwNew2" autocomplete="new-password">
+          <button class="btn block" id="btnPw">Simpan Password</button>
+        </div>
+      </section>
+
+      <!-- ===== AKUN LOGIN (ADMIN) ===== -->
+      <section id="pg_akun" hidden>
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="btn" id="btnAccAdd">➕ Tambah Akun</button>
+            <button class="btn ghost sm" id="btnAccSync">🔄 Sinkronkan dari Sheet Nama Guru</button>
+          </div>
+          <p class="muted"><b>Job Guru</b> hanya bisa absen untuk dirinya sendiri. <b>Job Admin</b> membuka semua menu. ID Login, Job, dan status mengikuti sheet <b>Nama Guru</b> (kolom id_login). Akun baru / hasil reset memakai password awal <b id="accDefPw">-</b> dan wajib diganti saat login pertama. Admin juga boleh dihubungkan ke nama guru agar bisa absen.</p>
+          <div class="scroll"><table class="t"><thead><tr><th>ID Login</th><th>Nama Guru</th><th>Job</th><th>Status</th><th>Info</th><th>Aksi</th></tr></thead><tbody id="accBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ===== REKAP ===== -->
+      <section id="pg_rekap" hidden>
+        <div class="tabs" id="rekapTabs">
+          <button data-rtab="bulan" class="active">🗓️ Rekap Bulanan</button>
+          <button data-rtab="tahun">📈 Rekap Tahunan</button>
+        </div>
+
+        <div id="tab_bulan" class="card">
+          <div class="toolbar">
+            <div><label>Bulan</label><select id="selMonth"></select></div>
+            <button class="btn sm" id="btnMonthLoad">Tampilkan</button>
+            <button class="btn ghost sm" id="btnMonthPrint">🖨️ Cetak dengan Kop Surat</button>
+            <button class="btn ghost sm" id="btnMonthHol">📅 Tambah Libur Khusus</button>
+          </div>
+          <div id="monthOut"><p class="muted">Pilih bulan lalu klik Tampilkan.</p></div>
+        </div>
+
+        <div id="tab_tahun" class="card" hidden>
+          <div class="toolbar">
+            <button class="btn sm" id="btnYearLoad">Muat Rekap Tahun Ajaran</button>
+            <button class="btn ghost sm" id="btnYearPrint">🖨️ Cetak dengan Kop Surat</button>
+            <label style="margin:0;font-weight:400;display:flex;gap:6px;align-items:center"><input type="checkbox" id="chkNotes" style="width:auto"> sertakan catatan pada cetakan</label>
+          </div>
+          <div id="yearOut"><p class="muted">Klik "Muat Rekap Tahun Ajaran".</p></div>
+        </div>
+      </section>
+
+      <!-- ===== KOREKSI ===== -->
+      <section id="pg_koreksi" hidden>
+        <div class="grid2">
+          <div class="card">
+            <h2>Input / Koreksi Absensi</h2>
+            <label>Tanggal</label><input type="date" id="adDate">
+            <label>Nama Guru</label><select id="adName"></select>
+            <div class="row2">
+              <div><label>Keterangan</label>
+                <select id="adStatus"><option value="H">H — Hadir</option><option value="I">I — Izin</option><option value="S">S — Sakit</option>
+                <option value="T">T — Telat</option><option value="TJ">TJ — Tidak ada jadwal</option><option value="A">A — Alpa (tanpa keterangan)</option><option value="">(Kosongkan / kembali ke BA)</option></select></div>
+              <div id="adLateBox" hidden><label>Menit telat</label><input type="number" id="adLate" min="0" value="0"></div>
+            </div>
+            <div id="adTimeBox">
+              <label for="adTime">Jam masuk (opsional)</label>
+              <input type="time" id="adTime">
+              <p class="muted" style="margin:6px 0 0">Isi jam masuk untuk guru yang <b>BA</b> / lupa absen. Sistem menentukan otomatis: <b>Hadir</b> bila tidak melewati <span id="adJamLim">07:00</span>, selain itu <b>Telat</b> (menit telat dihitung otomatis).</p>
+            </div>
+            <label>Catatan / alasan</label><textarea id="adNote" maxlength="300"></textarea>
+            <button class="btn block" id="btnAdSave">Simpan</button>
+          </div>
+          <div class="card">
+            <h2>Tambah Guru Baru</h2>
+            <p class="muted">Nama akan ditambahkan ke semua sheet bulan yang sudah ada.</p>
+            <label>Nama lengkap (beserta gelar)</label><input id="newTeacher">
+            <button class="btn block" id="btnAddTeacher">Tambah Guru</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== HARI LIBUR ===== -->
+      <section id="pg_libur" hidden>
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="btn" id="btnHolAdd">➕ Tambah Libur Khusus</button>
+            <button class="btn ghost sm" id="btnHolSync">🔄 Sinkronkan Libur Nasional</button>
+          </div>
+          <p class="muted" id="holAY"></p>
+          <p class="muted">Libur nasional &amp; cuti bersama terisi otomatis sesuai SKB 3 Menteri. Gunakan <b>Tambah Libur Khusus</b> untuk libur di luar libur nasional (libur semester, class meeting, ujian, dll.). Sabtu/Minggu otomatis libur sesuai pengaturan hari kerja.</p>
+          <div class="scroll"><table class="t"><thead><tr><th>Tanggal</th><th>Keterangan</th><th>Jenis</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="holBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ===== BUKA ABSEN LIBUR (ADMIN) ===== -->
+      <section id="pg_izin" hidden>
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="btn ghost sm" id="btnReqReload">🔄 Muat Ulang</button>
+          </div>
+          <p class="muted">Guru yang masuk pada hari libur / Sabtu / Minggu mengajukan permintaan dari menu Absensi. Setelah Anda <b>Setujui</b>, guru tersebut bisa absen pada hari itu. Persetujuan hanya berlaku untuk tanggal permintaan dan bisa dicabut selama hari itu.</p>
+          <div class="scroll"><table class="t"><thead><tr><th>Tanggal</th><th>Nama Guru</th><th>Alasan</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="reqBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- ===== PENGATURAN ===== -->
+      <section id="pg_atur" hidden>
+        <div class="card">
+          <h2>Pengaturan</h2>
+          <div class="row2">
+            <div><label>Nama Sekolah</label><input id="set_NamaSekolah"></div>
+            <div><label>Kota (tanda tangan cetakan)</label><input id="set_Kota"></div>
+            <div><label>Jam Masuk (HH:mm)</label><input id="set_JamMasuk" placeholder="07:00"></div>
+            <div><label>Hari Kerja per Minggu</label><select id="set_HariKerja"><option value="5">5 hari (Senin–Jumat)</option><option value="6">6 hari (Senin–Sabtu)</option></select></div>
+            <div><label>Cuti Bersama</label><select id="set_CutiBersama"><option value="Libur">Dianggap libur</option><option value="Masuk">Tetap masuk</option></select></div>
+            <div><label>Tahun Ajaran Mulai (Agustus)</label><input id="set_TahunAjaranMulai" placeholder="2026"></div>
+            <div><label>Jabatan Penandatangan</label><input id="set_Jabatan"></div>
+            <div><label>Nama Penandatangan</label><input id="set_NamaPenandatangan"></div>
+            <div><label>NIP (opsional)</label><input id="set_NIP"></div>
+            <div><label>Password Awal Akun Baru / Reset</label><input id="set_PasswordAwal"></div>
+          </div>
+          <h3>📍 Lokasi Absensi</h3>
+          <p class="muted">Absen <b>Hadir</b> hanya diterima bila HP berada dalam radius dari titik sekolah. Izin / Sakit / Tidak ada jadwal tidak dibatasi lokasi. Cara paling akurat: berdiri di tengah sekolah lalu tekan <b>Pakai lokasi saya sekarang</b>.</p>
+          <div class="row2">
+            <div><label>Wajib berada di sekolah?</label><select id="set_LokasiWajib"><option value="Ya">Ya</option><option value="Tidak">Tidak (tanpa cek lokasi)</option></select></div>
+            <div><label>Radius area (meter)</label><input id="set_RadiusMeter" inputmode="numeric" placeholder="100"></div>
+            <div><label>Latitude sekolah</label><input id="set_SekolahLat" placeholder="-6.890437"></div>
+            <div><label>Longitude sekolah</label><input id="set_SekolahLng" placeholder="107.626437"></div>
+            <div><label>Batas akurasi GPS (meter)</label><input id="set_MaxAkurasi" inputmode="numeric" placeholder="100"></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn ghost sm" id="btnUseHere" type="button">📍 Pakai lokasi saya sekarang</button>
+            <a class="btn ghost sm" id="lnkMap" href="#" target="_blank" rel="noopener" style="text-decoration:none">🗺️ Cek di Google Maps</a>
+          </div>
+          <button class="btn" style="margin-top:16px" id="btnSaveSet">Simpan Pengaturan</button>
+        </div>
+        <div class="card">
+          <h2>Sheet Bulan</h2>
+          <p class="muted">Membuat sheet Agustus–Juli yang belum ada dan menyeragamkan formatnya (judul, header, warna akhir pekan &amp; libur, kolom L). Daftar guru diambil dari sheet <b>Nama Guru</b> (status Aktif). Sheet yang sudah berisi absensi tidak dihapus datanya; guru baru hanya ditambahkan di bawah.</p>
+          <button class="btn ghost" id="btnSetupMonths">🗓️ Buat &amp; Format Semua Sheet Bulan</button>
+          <pre id="setupOut" class="muted" style="white-space:pre-wrap;margin:12px 0 0"></pre>
+        </div>
+        <div class="card">
+          <h2>Rapikan Data</h2>
+          <p class="muted">Membuat salinan cadangan di Google Drive lebih dulu, lalu merapikan semua sheet bulan: tanggal libur diisi <b>L</b> (tulisan "LIBUR" manual dibersihkan), kode lama <b>O</b> menjadi <b>H</b>, nama &amp; nomor dirapikan, tampilan tabel diseragamkan. Kode lain yang tidak dikenal tidak diubah, hanya ditandai kuning.</p>
+          <button class="btn ghost" id="btnClean">🧹 Rapikan Data Semua Sheet Bulan</button>
+          <pre id="cleanOut" class="muted" style="white-space:pre-wrap;margin:12px 0 0"></pre>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="modal" id="holModal" hidden>
+  <div class="card">
+    <h2>📅 Tambah Libur Khusus</h2>
+    <p class="muted">Untuk libur di luar libur nasional. Hari Sabtu/Minggu otomatis dilewati, dan sel guru pada tanggal itu terisi <b>L</b>.</p>
+    <div class="row2">
+      <div><label for="hlStart">Tanggal mulai</label><input type="date" id="hlStart"></div>
+      <div><label for="hlEnd">Sampai tanggal (opsional)</label><input type="date" id="hlEnd"></div>
+    </div>
+    <label for="hlName">Keterangan</label><input id="hlName" maxlength="120" placeholder="Contoh: Libur semester ganjil, Class meeting, Ujian">
+    <div style="display:flex;gap:10px;margin-top:18px"><button class="btn ghost" id="hlCancel" style="flex:1">Batal</button><button class="btn" id="hlSave" style="flex:1">Simpan</button></div>
+  </div>
+</div>
+
+<div id="printArea"></div>
+<div id="toast"></div>
+
+<?!= include('JS_Core'); ?>
+<?!= include('JS_Home'); ?>
+<?!= include('JS_Auth'); ?>
+<?!= include('JS_Rekap'); ?>
+<?!= include('JS_Admin'); ?>
+</body>
+</html>
